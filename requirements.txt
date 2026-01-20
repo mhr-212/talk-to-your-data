@@ -1,0 +1,10 @@
+flask
+sqlalchemy
+psycopg2-binary
+python-dotenv
+google-genai
+pytest
+pytest-cov
+PyJWT
+flask-limiter
+APScheduler

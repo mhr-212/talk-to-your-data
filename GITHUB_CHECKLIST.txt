@@ -1,0 +1,177 @@
+GitHub Upload Checklist
+Date: 2026-01-19
+
+Pre-Upload Verification
+
+Security (CRITICAL)
+[ ] .env file NOT in repo (real credentials protected)
+[ ] .gitignore excludes .env, __pycache__, .venv, *.log
+[ ] .env.example contains ONLY placeholders
+[ ] No hardcoded API keys in source code
+[ ] No database passwords in config files
+[ ] No personal data in sample database (130 rows are synthetic)
+[ ] README shows how to safely configure .env
+
+Documentation
+[ ] README.md - Quick start guide (updated)
+[ ] FEATURES.md - Feature descriptions
+[ ] ENHANCEMENTS.md - Enhancement list (8 items)
+[ ] SRS.md - Requirements specification
+[ ] SDD.md - Design specification
+[ ] SECURITY.md - Security policy (NEW)
+[ ] GITHUB_SETUP.txt - Setup instructions for cloners (NEW)
+[ ] EDGE_CASE_SUMMARY.md - Test results
+[ ] EDGE_CASE_TEST_RESULTS.md - Detailed findings
+
+Code Quality
+[ ] No debug print statements left in production code
+[ ] No TODO/FIXME comments without context
+[ ] Consistent formatting (Python PEP 8)
+[ ] Type hints where applicable
+[ ] Docstrings on all functions
+
+Testing
+[ ] quick_test.py works and passes
+[ ] test_validator.py works and passes
+[ ] test_edge_cases.py works and passes
+[ ] All tests run without real database (use fallback)
+
+Git Setup
+[ ] Git initialized: git init
+[ ] .gitignore created and working
+[ ] Files staged: git add .
+[ ] Initial commit: git commit -m "Initial commit"
+[ ] GitHub repo created (empty, no README)
+[ ] Remote added: git remote add origin https://github.com/user/repo
+[ ] Pushed: git push -u origin main
+
+GitHub Repository Settings
+[ ] Repository visibility set to Public
+[ ] Add description and keywords
+[ ] Add topics: python, flask, ai, nlp, sql, database, llm
+[ ] Set LICENSE (MIT/Apache/GPL)
+[ ] Enable GitHub Discussions (optional)
+[ ] Enable Issues
+[ ] Disable Wiki (if not needed)
+[ ] Add branch protection (main branch)
+
+Files to Include
+Code
+[X] app.py - Flask API (17 endpoints)
+[X] config.py - Configuration loader
+[X] llm.py - LLM integration with Google Gemini
+[X] executor.py - Safe query execution
+[X] validator.py - SQL injection prevention (13 checks)
+[X] explainer.py - Result explanation
+[X] schema.py - Schema introspection + caching
+[X] auth.py - JWT authentication
+[X] rbac.py - Role-based access control
+[X] logs.py - Query audit trail
+[X] caching.py - Result caching with TTL
+[X] analytics.py - Performance analytics dashboard
+[X] saved_queries.py - Save/search queries
+[X] populate_db.py - Sample data loader
+
+Frontend
+[X] static/index_enhanced.html - Modern UI (enhanced)
+[X] static/app_enhanced.js - Enhanced frontend with Chart.js
+[X] static/index.html - Classic UI
+[X] static/app.js - Classic frontend
+
+Configuration & Environment
+[X] .env.example - Environment template (NO SECRETS)
+[X] .gitignore - Excludes secrets, cache, venv, logs
+[X] requirements.txt - Dependencies
+[X] populate_db.py - Sample database setup
+
+Documentation
+[X] README.md - Quick start & API docs
+[X] FEATURES.md - Feature descriptions
+[X] ENHANCEMENTS.md - 8 enhancements delivered
+[X] SRS.md - Software Requirements Specification
+[X] SDD.md - Software Design Description
+[X] SECURITY.md - Security policy & hardening
+[X] GITHUB_SETUP.txt - GitHub setup guide
+[X] EDGE_CASE_SUMMARY.md - Test results summary
+[X] EDGE_CASE_TEST_RESULTS.md - Detailed test results
+[X] Upwork_Project_Report.txt - Project portfolio entry
+
+Tests
+[X] quick_test.py - 10 quick edge-case tests
+[X] test_validator.py - 13 security validation tests
+[X] test_edge_cases.py - 15 comprehensive tests
+
+Files to EXCLUDE
+[ ] .env (real credentials) - BLOCKED by .gitignore
+[ ] __pycache__/ - BLOCKED by .gitignore
+[ ] .venv/ - BLOCKED by .gitignore
+[ ] .git/ (except config, don't push .git history with secrets)
+[ ] *.log - BLOCKED by .gitignore
+[ ] *.db, *.sqlite - BLOCKED by .gitignore
+[ ] test_results.txt - BLOCKED by .gitignore
+[ ] .vscode/ - BLOCKED by .gitignore
+[ ] .idea/ - BLOCKED by .gitignore
+
+First-Time Pushers
+
+Step-by-step for first upload:
+
+1. Verify Git is installed:
+   git --version
+
+2. In project directory, initialize repo:
+   cd c:\Users\MHR\Desktop\talk_to_your_data
+   git init
+
+3. Check .gitignore is in place:
+   ls -la | grep gitignore
+
+4. Stage all files (excludes .env, __pycache__, .venv, *.log):
+   git add .
+
+5. Verify .env is NOT staged:
+   git status | grep .env
+   (Should show nothing)
+
+6. Create initial commit:
+   git commit -m "Initial commit: Talk to Your Data AI Analyst
+
+   - NL-to-SQL Flask API with 17 endpoints
+   - RBAC, JWT, rate limiting, SQL injection prevention
+   - Fallback mode for offline/quota-safe operation
+   - Enhanced UI with caching, charts, export
+   - Full documentation and edge-case test coverage"
+
+7. Create GitHub repo (EMPTY, no README/license/gitignore):
+   - Go to github.com/new
+   - Name: talk-to-your-data
+   - Description: Production-ready NL-to-SQL analytics with LLM or fallback mode
+   - Make it Public
+   - Do NOT initialize with README, .gitignore, or license
+
+8. Add remote:
+   git remote add origin https://github.com/your-username/talk-to-your-data.git
+   git branch -M main
+   git push -u origin main
+
+9. Add GitHub topics (Settings > About):
+   - python, flask, ai, nlp, sql, postgresql, llm, natural-language-processing, text-to-sql
+
+10. Add LICENSE (GitHub will show "Add license"):
+    - Choose MIT or Apache 2.0
+
+11. Enable Issues & Discussions (Settings):
+    - Allow Issues: Yes
+    - Allow Discussions: Yes (optional)
+
+For Help
+- GitHub Docs: https://docs.github.com/
+- Git Cheat Sheet: https://github.github.com/training-kit/downloads/github-git-cheat-sheet.pdf
+- Securing repos: https://docs.github.com/en/code-security
+
+Post-Upload
+[ ] Share GitHub link in portfolio
+[ ] Add GitHub link to resume/Upwork
+[ ] Monitor issues and pull requests
+[ ] Keep dependencies updated
+[ ] Monitor security alerts (GitHub Advanced Security)

@@ -1,0 +1,593 @@
+"""
+Talk to Your Data – AI Analyst (Text-to-SQL System)
+Flask API for natural language database queries
+"""
+import time
+import csv
+import io
+import json
+from dotenv import load_dotenv
+
+# Load environment variables first
+load_dotenv()
+
+from flask import Flask, request, jsonify, send_from_directory, send_file
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from config import get_config
+import llm
+import executor
+import validator
+import explainer
+import rbac
+import logs as logs_module
+from schema import introspect_schema, format_schema_for_prompt, get_allowed_tables, SchemaCache
+from auth import require_auth, require_role, get_auth_from_header, generate_token
+from saved_queries import get_saved_query_store
+from analytics import record_query, get_analytics
+from caching import get_cached, set_cache, get_cache
+
+
+app = Flask(__name__)
+config = get_config()
+
+# Initialize rate limiter
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=["200 per hour", "50 per minute"],
+    storage_uri="memory://"
+)
+
+# Global service instances
+db_engine = None
+genai_client = None
+schema_cache = None
+
+
+def init_services():
+    """Initialize all services: database, LLM client, schema cache."""
+    global db_engine, genai_client, schema_cache
+    
+    # Initialize database engine
+    if not config.DATABASE_URL:
+        print("WARNING: DATABASE_URL not configured")
+    else:
+        try:
+            db_engine = executor.init_engine(
+                config.DATABASE_URL,
+                statement_timeout_ms=config.STATEMENT_TIMEOUT_MS,
+                readonly=config.READONLY,
+            )
+            print(f"✓ Database initialized: {config.DATABASE_URL[:50]}...")
+        except Exception as e:
+            print(f"✗ Database init failed: {e}")
+    
+    # Initialize LLM client
+    if not config.GEMINI_API_KEY:
+        print("WARNING: GEMINI_API_KEY not configured")
+    else:
+        try:
+            genai_client = llm.init_genai_client(config.GEMINI_API_KEY)
+            print(f"✓ LLM client initialized: {config.GENAI_MODEL_ID}")
+        except Exception as e:
+            print(f"✗ LLM init failed: {e}")
+    
+    # Initialize schema cache
+    if config.ENABLE_SCHEMA_CACHE:
+        schema_cache = SchemaCache(ttl_seconds=config.SCHEMA_CACHE_TTL_S)
+        print(f"✓ Schema cache enabled (TTL={config.SCHEMA_CACHE_TTL_S}s)")
+
+
+@app.route("/", methods=["GET"])
+def root():
+    """Serve the enhanced web UI."""
+    return send_from_directory("static", "index_enhanced.html")
+
+
+@app.route("/classic", methods=["GET"])
+def classic():
+    """Serve the classic web UI."""
+    return send_from_directory("static", "index.html")
+
+
+@app.route("/static/<path:path>", methods=["GET"])
+def static_files(path):
+    """Serve static files (CSS, JS, etc)."""
+    return send_from_directory("static", path)
+
+
+@app.route("/health", methods=["GET"])
+def health():
+    """Health check endpoint reporting service readiness."""
+    status = {
+        "status": "ok" if (db_engine and genai_client) else "degraded",
+        "timestamp": time.time(),
+        "config": {
+            "database_url": bool(config.DATABASE_URL),
+            "gemini_api_key": bool(config.GEMINI_API_KEY),
+            "dev_fallback_mode": config.DEV_FALLBACK_MODE,
+        },
+        "services": {
+            "database": db_engine is not None,
+            "genai_client": genai_client is not None,
+            "schema_cache": schema_cache is not None,
+        },
+        "features": {
+            "rbac": config.ENABLE_RBAC,
+            "logging": config.ENABLE_LOGGING,
+            "schema_cache": config.ENABLE_SCHEMA_CACHE,
+        },
+    }
+    
+    # Try a trivial DB query if engine exists
+    if db_engine:
+        try:
+            executor.execute_query(db_engine, "SELECT 1")
+            status["services"]["database"] = True
+        except Exception as e:
+            status["services"]["database"] = False
+            status["db_error"] = str(e)
+    
+    return jsonify(status)
+
+
+@app.route("/query", methods=["POST"])
+@limiter.limit("20 per minute")
+def query_data():
+    """
+    Process a natural language question and return SQL results.
+    
+    Request JSON:
+        {
+            "question": "What are total sales by region?",
+            "user_id": "user_1" (optional, for RBAC)
+        }
+    
+    Response JSON (success):
+        {
+            "question": "...",
+            "generated_sql": "SELECT ...",
+            "columns": ["col1", "col2"],
+            "rows": [{"col1": "val1", "col2": "val2"}, ...],
+            "explanation": "...",
+            "latency_ms": 123,
+        }
+    
+    Response JSON (error):
+        {
+            "error": "Error message",
+            "details": "Additional context",
+            "generated_sql": "..." (if available)
+        }
+    """
+    query_start = time.time()
+    
+    # Parse request
+    try:
+        data = request.get_json() or {}
+        question = data.get("question", "").strip()
+        user_request_context = {
+            "user_id": data.get("user_id", "user_1"),
+            "username": data.get("username", "analyst"),
+            "role": data.get("role", "analyst"),
+        }
+    except Exception as e:
+        return jsonify({"error": "Invalid request body", "details": str(e)}), 400
+    
+    if not question:
+        return jsonify({"error": "Question is required"}), 400
+    
+    # Check service readiness
+    if not db_engine:
+        return jsonify({"error": "Database not configured"}), 503
+    if not genai_client and not config.DEV_FALLBACK_MODE:
+        return jsonify({"error": "LLM client not configured"}), 503
+    
+    try:
+        # 1. Get user and check permissions
+        if config.ENABLE_RBAC:
+            user = rbac.get_user_from_request(user_request_context)
+        else:
+            user = rbac.User(user_id="system", username="system", role="admin")
+        
+        # 2. Introspect schema and filter by user permissions
+        try:
+            schema_dict = introspect_schema(db_engine, schema_cache if config.ENABLE_SCHEMA_CACHE else None)
+        except Exception as e:
+            return jsonify({"error": "Schema introspection failed", "details": str(e)}), 500
+        
+        # Get allowed tables for user
+        allowed_tables = rbac.get_allowed_resources(user)
+        if allowed_tables != ["*"]:
+            schema_dict = get_allowed_tables(schema_dict, allowed_tables)
+        
+        if not schema_dict:
+            return jsonify({"error": "No accessible tables for this user"}), 403
+        
+        # 3. Prepare schema context for LLM
+        schema_str = format_schema_for_prompt(schema_dict)
+        
+        # 4. Generate SQL using LLM
+        if config.DEV_FALLBACK_MODE:
+            # Fallback: use simple template-based SQL for common queries
+            print(f"ℹ Using fallback SQL generation (not calling LLM)")
+            generated_sql = _dev_fallback_sql(question, list(schema_dict.keys()))
+        else:
+            try:
+                generated_sql = llm.generate_sql(
+                    client=genai_client,
+                    model_id=config.GENAI_MODEL_ID,
+                    question=question,
+                    schema_context=schema_str,
+                    temperature=config.LLM_TEMPERATURE,
+                    timeout_seconds=config.LLM_TIMEOUT_S,
+                )
+            except Exception as e:
+                # Graceful fallback when LLM fails
+                print(f"⚠ LLM generation failed: {e}, using fallback mode")
+                generated_sql = _dev_fallback_sql(question, list(schema_dict.keys()))
+        
+        # 5. Validate SQL
+        try:
+            list_of_allowed = list(schema_dict.keys())
+            safe_sql = validator.sanitize_and_validate_sql(
+                generated_sql,
+                allowed_tables=list_of_allowed,
+                max_limit=config.MAX_LIMIT,
+            )
+        except ValueError as e:
+            logs_module.log_query(
+                user_id=user.user_id,
+                question=question,
+                generated_sql=generated_sql,
+                status="error",
+                latency_ms=(time.time() - query_start) * 1000,
+                error_message=f"SQL validation failed: {e}",
+            )
+            return jsonify({
+                "error": "Generated SQL did not pass safety checks",
+                "details": str(e),
+                "generated_sql": generated_sql,
+            }), 400
+        
+        # 6. Execute query
+        try:
+            columns, rows = executor.execute_query(db_engine, safe_sql)
+        except Exception as e:
+            logs_module.log_query(
+                user_id=user.user_id,
+                question=question,
+                generated_sql=safe_sql,
+                status="error",
+                latency_ms=(time.time() - query_start) * 1000,
+                error_message=f"Query execution failed: {e}",
+            )
+            return jsonify({"error": "Query execution failed", "details": str(e)}), 500
+        
+        # 7. Generate explanation
+        explanation = None
+        if config.DEV_FALLBACK_MODE:
+            # Fallback: generate explanation from results instead of calling LLM
+            num_rows = len(rows) if rows else 0
+            num_cols = len(columns) if columns else 0
+            col_summary = ", ".join(columns[:3]) + ("..." if num_cols > 3 else "")
+            explanation = f"Retrieved {num_rows} record(s) with columns: {col_summary}."
+            print(f"ℹ Using fallback explanation (not calling LLM)")
+        else:
+            try:
+                explanation = explainer.generate_explanation(
+                    client=genai_client,
+                    model_id=config.GENAI_MODEL_ID,
+                    question=question,
+                    sql=safe_sql,
+                    sample_rows=rows,
+                    temperature=config.LLM_TEMPERATURE,
+                    timeout_seconds=config.LLM_TIMEOUT_S,
+                )
+            except Exception as e:
+                # Graceful fallback: generate basic explanation from results
+                print(f"⚠ Explanation generation failed: {e}, using fallback")
+                num_rows = len(rows) if rows else 0
+                num_cols = len(columns) if columns else 0
+                col_summary = ", ".join(columns[:3]) + ("..." if num_cols > 3 else "")
+                explanation = f"Retrieved {num_rows} record(s) with columns: {col_summary}."
+        
+        # 8. Log successful query
+        latency_ms = (time.time() - query_start) * 1000
+        if config.ENABLE_LOGGING:
+            logs_module.log_query(
+                user_id=user.user_id,
+                question=question,
+                generated_sql=safe_sql,
+                status="success",
+                latency_ms=latency_ms,
+                rows_returned=len(rows),
+            )
+        
+        # Record in analytics
+        record_query(user.user_id, question, safe_sql, latency_ms, len(rows))
+        
+        # Try to cache result
+        try:
+            set_cache(user.user_id, question, columns, rows, explanation)
+        except:
+            pass  # Cache failures are non-blocking
+        
+        return jsonify({
+            "question": question,
+            "generated_sql": safe_sql,
+            "columns": columns,
+            "rows": rows,
+            "explanation": explanation,
+            "latency_ms": round(latency_ms, 2),
+        })
+    
+    except Exception as e:
+        latency_ms = (time.time() - query_start) * 1000
+        if config.ENABLE_LOGGING:
+            logs_module.log_query(
+                user_id=user_request_context.get("user_id", "unknown"),
+                question=question,
+                generated_sql="",
+                status="error",
+                latency_ms=latency_ms,
+                error_message=str(e),
+            )
+        return jsonify({"error": "Internal server error", "details": str(e)}), 500
+
+
+@app.route("/logs", methods=["GET"])
+def get_query_logs():
+    """
+    Retrieve recent query logs (admin only in production).
+    Query params:
+        - limit: number of recent logs to return (default: 50)
+    """
+    limit = request.args.get("limit", 50, type=int)
+    recent_logs = logs_module.get_logs(limit=limit)
+    return jsonify({"logs": recent_logs, "count": len(recent_logs)})
+
+
+def _dev_fallback_sql(question: str, available_tables: list) -> str:
+    """
+    Simple dev fallback: return a basic SELECT for testing without LLM.
+    Only works if 'sales' table exists.
+    """
+    question_lower = question.lower()
+    
+    if "sales" in available_tables:
+        if "region" in question_lower:
+            return "SELECT region, SUM(amount) as total FROM sales GROUP BY region"
+        elif "total" in question_lower or "sum" in question_lower:
+            return "SELECT SUM(amount) as total_sales FROM sales"
+        else:
+            return "SELECT * FROM sales"
+    
+    # Fallback: just select first table
+    if available_tables:
+        return f"SELECT * FROM {available_tables[0]}"
+    
+    raise ValueError("No tables available for fallback query")
+
+
+@app.route("/auth/token", methods=["POST"])
+def get_token():
+    """Generate JWT token for user."""
+    data = request.get_json() or {}
+    user_id = data.get("user_id", "user_1")
+    username = data.get("username", "analyst")
+    role = data.get("role", "analyst")
+    
+    token = generate_token(user_id, username, role)
+    return jsonify({
+        "token": token,
+        "user_id": user_id,
+        "username": username,
+        "role": role,
+    })
+
+
+@app.route("/saved-queries", methods=["GET", "POST"])
+def saved_queries():
+    """List or save queries."""
+    auth = get_auth_from_header()
+    if not auth:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    store = get_saved_query_store()
+    
+    if request.method == "POST":
+        # Save new query
+        data = request.get_json() or {}
+        name = data.get("name", "").strip()
+        question = data.get("question", "").strip()
+        generated_sql = data.get("generated_sql", "").strip()
+        
+        if not (name and question and generated_sql):
+            return jsonify({"error": "name, question, and generated_sql are required"}), 400
+        
+        try:
+            saved = store.save(auth["user_id"], name, question, generated_sql)
+            return jsonify({
+                "message": "Query saved",
+                "query": saved.to_dict(),
+            }), 201
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+    
+    else:
+        # List user's saved queries
+        limit = request.args.get("limit", 50, type=int)
+        queries = store.list_user_queries(auth["user_id"], limit)
+        return jsonify({
+            "queries": [q.to_dict() for q in queries],
+            "count": len(queries),
+        })
+
+
+@app.route("/saved-queries/search", methods=["GET"])
+def search_saved_queries():
+    """Search saved queries by keyword."""
+    auth = get_auth_from_header()
+    if not auth:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    keyword = request.args.get("q", "").strip()
+    if not keyword:
+        return jsonify({"error": "q parameter is required"}), 400
+    
+    store = get_saved_query_store()
+    results = store.search(auth["user_id"], keyword)
+    return jsonify({
+        "keyword": keyword,
+        "results": [q.to_dict() for q in results],
+        "count": len(results),
+    })
+
+
+@app.route("/saved-queries/<query_id>", methods=["GET", "DELETE"])
+def saved_query_detail(query_id):
+    """Get or delete a saved query."""
+    auth = get_auth_from_header()
+    if not auth:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    store = get_saved_query_store()
+    
+    if request.method == "GET":
+        saved = store.get(query_id)
+        if not saved:
+            return jsonify({"error": "Query not found"}), 404
+        if saved.user_id != auth["user_id"]:
+            return jsonify({"error": "Forbidden"}), 403
+        
+        return jsonify(saved.to_dict())
+    
+    else:  # DELETE
+        saved = store.get(query_id)
+        if not saved:
+            return jsonify({"error": "Query not found"}), 404
+        if saved.user_id != auth["user_id"]:
+            return jsonify({"error": "Forbidden"}), 403
+        
+        store.delete(query_id)
+        return jsonify({"message": "Query deleted"})
+
+
+@app.route("/analytics/dashboard", methods=["GET"])
+def analytics_dashboard():
+    """Get analytics dashboard statistics."""
+    analytics = get_analytics()
+    stats = analytics.get_dashboard_stats()
+    return jsonify({
+        "timestamp": time.time(),
+        "stats": stats,
+    })
+
+
+@app.route("/analytics/slowest", methods=["GET"])
+def analytics_slowest():
+    """Get slowest queries."""
+    limit = request.args.get("limit", 10, type=int)
+    analytics = get_analytics()
+    slowest = analytics.get_slowest_queries(limit)
+    return jsonify({
+        "slowest_queries": slowest,
+        "count": len(slowest),
+    })
+
+
+@app.route("/cache/stats", methods=["GET"])
+def cache_stats():
+    """Get cache statistics."""
+    cache = get_cache()
+    stats = cache.get_stats()
+    return jsonify({
+        "cache_stats": stats,
+    })
+
+
+@app.route("/cache/clear", methods=["POST"])
+def cache_clear():
+    """Clear all cache (admin only)."""
+    auth = get_auth_from_header()
+    if not auth or auth.get("role") != "admin":
+        return jsonify({"error": "Admin only"}), 403
+    
+    cache = get_cache()
+    cache.clear()
+    return jsonify({"message": "Cache cleared"})
+
+
+@app.route("/query/export", methods=["POST"])
+def export_query_results():
+    """Export query results as CSV or JSON."""
+    data = request.get_json() or {}
+    columns = data.get("columns", [])
+    rows = data.get("rows", [])
+    format_type = data.get("format", "csv").lower()
+    
+    if not (columns and rows):
+        return jsonify({"error": "columns and rows are required"}), 400
+    
+    if format_type == "json":
+        # JSON export
+        output = io.StringIO()
+        json.dump(rows, output, indent=2, default=str)
+        output.seek(0)
+        return send_file(
+            io.BytesIO(output.getvalue().encode()),
+            mimetype="application/json",
+            as_attachment=True,
+            download_name="query_results.json"
+        )
+    
+    else:  # CSV
+        # CSV export
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=columns)
+        writer.writeheader()
+        writer.writerows(rows)
+        output.seek(0)
+        return send_file(
+            io.BytesIO(output.getvalue().encode()),
+            mimetype="text/csv",
+            as_attachment=True,
+            download_name="query_results.csv"
+        )
+
+
+if __name__ == "__main__":
+    # Initialize services on startup
+    init_services()
+    print("\n" + "=" * 70)
+    print("Talk to Your Data – AI Analyst (Enhanced)")
+    print("=" * 70)
+    print(f"Config: DEV_FALLBACK_MODE={config.DEV_FALLBACK_MODE}")
+    print("\nAPI Endpoints:")
+    print("  Core:")
+    print("    GET  /              - Web UI")
+    print("    POST /query         - Execute NL query")
+    print("    GET  /health        - Health check")
+    print("    GET  /logs          - Query logs")
+    print("\n  Authentication:")
+    print("    POST /auth/token    - Generate JWT token")
+    print("\n  Saved Queries:")
+    print("    GET  /saved-queries                - List user's saved queries")
+    print("    POST /saved-queries                - Save new query")
+    print("    GET  /saved-queries/search         - Search saved queries")
+    print("    GET  /saved-queries/<id>           - Get saved query")
+    print("    DEL  /saved-queries/<id>           - Delete saved query")
+    print("\n  Analytics:")
+    print("    GET  /analytics/dashboard          - Dashboard stats")
+    print("    GET  /analytics/slowest            - Slowest queries")
+    print("\n  Cache:")
+    print("    GET  /cache/stats                  - Cache statistics")
+    print("    POST /cache/clear                  - Clear cache (admin)")
+    print("\n  Data Export:")
+    print("    POST /query/export                 - Export as CSV/JSON")
+    print("=" * 70 + "\n")
+    
+    # Run Flask development server
+    app.run(host="127.0.0.1", port=5000, debug=False)
