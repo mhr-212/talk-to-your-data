@@ -19,7 +19,7 @@ class User:
 
 # Simple in-memory role-to-table mapping
 ROLE_TABLE_PERMISSIONS = {
-    "analyst": ["sales", "users", "orders"],
+    "analyst": ["*"],  # Allow analyst to see all tables (including uploaded ones)
     "admin": ["*"],  # Access to all tables
     "readonly": ["sales", "users"],  # Limited read-only user
 }
