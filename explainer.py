@@ -54,4 +54,7 @@ Explanation:"""
         )
         return (getattr(response, "text", "") or "").strip()
     except Exception as e:
+        error_str = str(e)
+        if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
+            return "AI daily quota exceeded. (You are on the free tier). The results above are still accurate!"
         return f"(Explanation unavailable: {e})"

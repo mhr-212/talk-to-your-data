@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -195,13 +196,19 @@
             font-size: 0.9em;
         }
 
+        #resultsTable {
+            overflow-x: auto;
+            width: 100%;
+        }
+
         table {
             width: 100%;
             border-collapse: collapse;
             margin-top: 10px;
         }
 
-        th, td {
+        th,
+        td {
             padding: 12px;
             text-align: left;
             border-bottom: 1px solid #ddd;
@@ -319,6 +326,7 @@
         }
     </style>
 </head>
+
 <body>
     <div class="layout">
         <!-- Sidebar -->
@@ -360,8 +368,10 @@
                     <label class="section-title">
                         Your Question
                         <div>
-                            <button class="btn-icon" onclick="document.getElementById('fileUpload').click()" title="Upload CSV">📂 Upload Data</button>
-                            <input type="file" id="fileUpload" accept=".csv" style="display: none;" onchange="uploadFile(this)">
+                            <button class="btn-icon" onclick="document.getElementById('fileUpload').click()"
+                                title="Upload CSV">📂 Upload Data</button>
+                            <input type="file" id="fileUpload" accept=".csv" style="display: none;"
+                                onchange="uploadFile(this)">
                             <button class="btn-icon" onclick="saveCurrentQuery()" title="Save query">💾</button>
                         </div>
                     </label>
@@ -391,7 +401,8 @@
                             Query Results
                             <div>
                                 <button class="btn-icon" onclick="exportData('csv')" title="Export CSV">📥 CSV</button>
-                                <button class="btn-icon" onclick="exportData('json')" title="Export JSON">📥 JSON</button>
+                                <button class="btn-icon" onclick="exportData('json')" title="Export JSON">📥
+                                    JSON</button>
                             </div>
                         </div>
                         <div id="resultsTable"></div>
@@ -423,4 +434,5 @@
 
     <script src="/static/app_enhanced.js"></script>
 </body>
+
 </html>
