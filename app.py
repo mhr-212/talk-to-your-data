@@ -565,6 +565,10 @@ def upload_csv():
     auth = get_auth_from_header()
     # In production, require admin/analyst role
     # if not auth: return jsonify({"error": "Unauthorized"}), 401
+    
+    # Lazy Init: Try to connect if not connected
+    if not db_engine:
+        init_services()
 
     if "file" not in request.files:
         return jsonify({"error": "No file part"}), 400
