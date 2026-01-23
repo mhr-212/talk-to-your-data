@@ -179,6 +179,10 @@ def query_data():
     if not question:
         return jsonify({"error": "Question is required"}), 400
     
+    # Lazy Init: Try to connect if not connected
+    if not db_engine:
+        init_services()
+    
     # Check service readiness
     if not db_engine:
         return jsonify({"error": "Database not configured"}), 503
