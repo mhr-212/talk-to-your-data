@@ -9,3 +9,4 @@ PyJWT
 flask-limiter
 APScheduler
 gunicorn
+pandas

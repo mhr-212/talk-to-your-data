@@ -281,6 +281,40 @@ async function saveCurrentQuery() {
     }
 }
 
+// Upload File
+async function uploadFile(input) {
+    if (!input.files || !input.files[0]) return;
+    
+    const file = input.files[0];
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    showStatus(`Uploading ${file.name}...`, 'loading');
+    
+    try {
+        const response = await fetch('/upload', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            showStatus(`Success! Uploaded '${data.table}' with ${data.rows} rows.`, 'success');
+            // Clear input so same file can be selected again if needed
+            input.value = '';
+            
+            // Suggest a question
+            document.getElementById('question').value = `Show me sample data from ${data.table}`;
+            document.getElementById('question').focus();
+        } else {
+            showStatus(`Upload failed: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        showStatus(`Upload error: ${error.message}`, 'error');
+    }
+}
+
 // Load query history
 async function loadQueryHistory() {
     try {

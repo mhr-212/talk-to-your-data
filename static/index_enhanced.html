@@ -359,7 +359,11 @@
                 <div class="section">
                     <label class="section-title">
                         Your Question
-                        <button class="btn-icon" onclick="saveCurrentQuery()" title="Save query">💾</button>
+                        <div>
+                            <button class="btn-icon" onclick="document.getElementById('fileUpload').click()" title="Upload CSV">📂 Upload Data</button>
+                            <input type="file" id="fileUpload" accept=".csv" style="display: none;" onchange="uploadFile(this)">
+                            <button class="btn-icon" onclick="saveCurrentQuery()" title="Save query">💾</button>
+                        </div>
                     </label>
                     <textarea id="question" placeholder="What are the total sales by region?"></textarea>
                     <div class="button-group">

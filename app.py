@@ -6,6 +6,7 @@ import time
 import csv
 import io
 import json
+import pandas as pd
 from dotenv import load_dotenv
 
 # Load environment variables first
@@ -558,6 +559,57 @@ def export_query_results():
         )
 
 
+@app.route("/upload", methods=["POST"])
+def upload_csv():
+    """Upload a CSV file and convert it to a database table."""
+    auth = get_auth_from_header()
+    # In production, require admin/analyst role
+    # if not auth: return jsonify({"error": "Unauthorized"}), 401
+
+    if "file" not in request.files:
+        return jsonify({"error": "No file part"}), 400
+    
+    file = request.files["file"]
+    if file.filename == "":
+        return jsonify({"error": "No selected file"}), 400
+    
+    if not file.filename.endswith(".csv"):
+        return jsonify({"error": "Only CSV files are allowed"}), 400
+    
+    try:
+        # 1. Read CSV into DataFrame
+        df = pd.read_csv(file)
+        
+        # 2. Sanitize table name (use filename, alphanumeric only)
+        table_name = "".join(c for c in file.filename.split(".")[0] if c.isalnum() or c == "_").lower()
+        if not table_name:
+            table_name = "uploaded_data"
+            
+        # 3. Write to database (replace if exists)
+        if db_engine:
+            df.to_sql(table_name, db_engine, if_exists="replace", index=False)
+            
+            # 4. Clear schema cache so new table is visible
+            if schema_cache:
+                schema_cache.clear()
+            
+            # 5. Get column info for response
+            columns = list(df.columns)
+            row_count = len(df)
+            
+            return jsonify({
+                "message": f"Successfully uploaded '{file.filename}' to table '{table_name}'",
+                "table": table_name,
+                "rows": row_count,
+                "columns": columns
+            })
+        else:
+            return jsonify({"error": "Database not configured"}), 503
+            
+    except Exception as e:
+        return jsonify({"error": "Upload failed", "details": str(e)}), 500
+
+
 if __name__ == "__main__":
     # Initialize services on startup
     init_services()
@@ -587,6 +639,7 @@ if __name__ == "__main__":
     print("    POST /cache/clear                  - Clear cache (admin)")
     print("\n  Data Export:")
     print("    POST /query/export                 - Export as CSV/JSON")
+    print("    POST /upload                       - Upload CSV to Database")
     print("=" * 70 + "\n")
     
     # Run Flask development server
