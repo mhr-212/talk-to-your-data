@@ -13,7 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadSavedQueries();
     loadQuickStats();
     checkHealth();
-    
+
     // Ctrl+Enter to submit
     document.getElementById('question').addEventListener('keydown', (e) => {
         if (e.ctrlKey && e.key === 'Enter') {
@@ -26,15 +26,15 @@ document.addEventListener('DOMContentLoaded', () => {
 async function submitQuery() {
     const questionEl = document.getElementById('question');
     const question = questionEl.value.trim();
-    
+
     if (!question) {
         showStatus('Please enter a question', 'error');
         return;
     }
-    
+
     showStatus('Processing your question...', 'loading');
     document.getElementById('submitBtn').disabled = true;
-    
+
     try {
         const response = await fetch('/query', {
             method: 'POST',
@@ -48,15 +48,15 @@ async function submitQuery() {
                 role: 'analyst'
             })
         });
-        
+
         const data = await response.json();
-        
+
         if (response.ok) {
             currentResults = data;
             currentQuery = question;
             displayResults(data);
             showStatus(`Query executed successfully in ${data.latency_ms.toFixed(0)}ms`, 'success');
-            
+
             // Refresh history and stats
             loadQueryHistory();
             loadQuickStats();
@@ -74,19 +74,19 @@ async function submitQuery() {
 function displayResults(data) {
     const resultsDiv = document.getElementById('results');
     resultsDiv.style.display = 'block';
-    
+
     // Show table view by default
     showTab('table');
-    
+
     // Build table
     buildTable(data.columns, data.rows);
-    
+
     // Show SQL
     document.getElementById('generatedSql').textContent = data.generated_sql;
-    
+
     // Show explanation
     document.getElementById('explanation').textContent = data.explanation || 'No explanation available';
-    
+
     // Build chart
     buildChart(data.columns, data.rows);
 }
@@ -94,21 +94,21 @@ function displayResults(data) {
 // Build table
 function buildTable(columns, rows) {
     const container = document.getElementById('resultsTable');
-    
+
     if (!rows || rows.length === 0) {
         container.innerHTML = '<p style="color: #999;">No results returned</p>';
         return;
     }
-    
+
     let html = '<table>';
-    
+
     // Header
     html += '<thead><tr>';
     columns.forEach(col => {
         html += `<th>${escapeHtml(col)}</th>`;
     });
     html += '</tr></thead>';
-    
+
     // Rows
     html += '<tbody>';
     rows.forEach(row => {
@@ -120,34 +120,34 @@ function buildTable(columns, rows) {
         html += '</tr>';
     });
     html += '</tbody></table>';
-    
+
     container.innerHTML = html;
 }
 
 // Build chart
 function buildChart(columns, rows) {
     if (!rows || rows.length === 0) return;
-    
+
     const canvas = document.getElementById('resultChart');
     const ctx = canvas.getContext('2d');
-    
+
     // Destroy previous chart
     if (chart) {
         chart.destroy();
     }
-    
+
     // Try to find label and value columns
     let labelCol = columns[0];
-    let valueCol = columns.find(c => c.toLowerCase().includes('total') || 
-                                      c.toLowerCase().includes('sum') || 
-                                      c.toLowerCase().includes('count') ||
-                                      c.toLowerCase().includes('amount')) || columns[1];
-    
+    let valueCol = columns.find(c => c.toLowerCase().includes('total') ||
+        c.toLowerCase().includes('sum') ||
+        c.toLowerCase().includes('count') ||
+        c.toLowerCase().includes('amount')) || columns[1];
+
     if (!valueCol) valueCol = columns[columns.length - 1];
-    
+
     const labels = rows.map(r => String(r[labelCol]));
     const data = rows.map(r => Number(r[valueCol]) || 0);
-    
+
     chart = new Chart(ctx, {
         type: 'bar',
         data: {
@@ -191,7 +191,7 @@ function showTab(tabName) {
             tab.classList.add('active');
         }
     });
-    
+
     // Update content
     document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
     document.getElementById(`${tabName}Tab`).classList.add('active');
@@ -203,9 +203,9 @@ async function exportData(format) {
         showStatus('No results to export', 'error');
         return;
     }
-    
+
     showStatus(`Exporting as ${format.toUpperCase()}...`, 'loading');
-    
+
     try {
         const response = await fetch('/query/export', {
             method: 'POST',
@@ -220,7 +220,7 @@ async function exportData(format) {
                 sql: currentResults.generated_sql
             })
         });
-        
+
         if (response.ok) {
             const blob = await response.blob();
             const url = window.URL.createObjectURL(blob);
@@ -231,7 +231,7 @@ async function exportData(format) {
             a.click();
             document.body.removeChild(a);
             window.URL.revokeObjectURL(url);
-            
+
             showStatus(`Exported successfully as ${format.toUpperCase()}`, 'success');
         } else {
             const data = await response.json();
@@ -245,15 +245,15 @@ async function exportData(format) {
 // Save current query
 async function saveCurrentQuery() {
     const question = document.getElementById('question').value.trim();
-    
+
     if (!question) {
         showStatus('No query to save', 'error');
         return;
     }
-    
+
     const name = prompt('Enter a name for this query:');
     if (!name) return;
-    
+
     try {
         const response = await fetch('/saved-queries', {
             method: 'POST',
@@ -267,9 +267,9 @@ async function saveCurrentQuery() {
                 description: ''
             })
         });
-        
+
         const data = await response.json();
-        
+
         if (response.ok) {
             showStatus('Query saved successfully!', 'success');
             loadSavedQueries();
@@ -284,31 +284,32 @@ async function saveCurrentQuery() {
 // Upload File
 async function uploadFile(input) {
     if (!input.files || !input.files[0]) return;
-    
+
     const file = input.files[0];
     const formData = new FormData();
     formData.append('file', file);
-    
+
     showStatus(`Uploading ${file.name}...`, 'loading');
-    
+
     try {
         const response = await fetch('/upload', {
             method: 'POST',
             body: formData
         });
-        
+
         const data = await response.json();
-        
+
         if (response.ok) {
             showStatus(`Success! Uploaded '${data.table}' with ${data.rows} rows.`, 'success');
             // Clear input so same file can be selected again if needed
             input.value = '';
-            
+
             // Suggest a question
             document.getElementById('question').value = `Show me sample data from ${data.table}`;
             document.getElementById('question').focus();
         } else {
-            showStatus(`Upload failed: ${data.error}`, 'error');
+            const errorMsg = data.details ? `${data.error}: ${data.details}` : data.error;
+            showStatus(`Upload failed: ${errorMsg}`, 'error');
         }
     } catch (error) {
         showStatus(`Upload error: ${error.message}`, 'error');
@@ -320,14 +321,14 @@ async function loadQueryHistory() {
     try {
         const response = await fetch('/logs?limit=10');
         const data = await response.json();
-        
+
         const container = document.getElementById('queryHistory');
-        
+
         if (!data.logs || data.logs.length === 0) {
             container.innerHTML = '<p style="color: #999; font-size: 0.85em;">No recent queries</p>';
             return;
         }
-        
+
         let html = '';
         data.logs.slice(0, 10).forEach(log => {
             const timeAgo = getTimeAgo(new Date(log.timestamp));
@@ -338,7 +339,7 @@ async function loadQueryHistory() {
                 </div>
             `;
         });
-        
+
         container.innerHTML = html;
     } catch (error) {
         console.error('Failed to load history:', error);
@@ -350,14 +351,14 @@ async function loadSavedQueries() {
     try {
         const response = await fetch('/saved-queries?user_id=demo_user');
         const data = await response.json();
-        
+
         const container = document.getElementById('savedQueries');
-        
+
         if (!data.queries || data.queries.length === 0) {
             container.innerHTML = '<p style="color: #999; font-size: 0.85em;">No saved queries</p>';
             return;
         }
-        
+
         let html = '';
         data.queries.forEach(query => {
             html += `
@@ -367,7 +368,7 @@ async function loadSavedQueries() {
                 </div>
             `;
         });
-        
+
         container.innerHTML = html;
     } catch (error) {
         console.error('Failed to load saved queries:', error);
@@ -379,14 +380,14 @@ async function loadQuickStats() {
     try {
         const response = await fetch('/analytics/dashboard');
         const data = await response.json();
-        
+
         const container = document.getElementById('quickStats');
-        
+
         const stats = data.analytics;
-        const successRate = stats.total_queries > 0 
+        const successRate = stats.total_queries > 0
             ? ((stats.successful_queries / stats.total_queries) * 100).toFixed(0)
             : 0;
-        
+
         container.innerHTML = `
             <div style="padding: 10px 0; border-bottom: 1px solid #eee;">
                 <div>Total Queries: <strong>${stats.total_queries}</strong></div>
@@ -415,7 +416,7 @@ function showStatus(message, type) {
     statusEl.textContent = message;
     statusEl.className = `status-${type}`;
     statusEl.style.display = 'block';
-    
+
     if (type !== 'loading') {
         setTimeout(() => {
             statusEl.style.display = 'none';
@@ -439,7 +440,7 @@ function clearAll() {
     document.getElementById('status').style.display = 'none';
     currentResults = null;
     currentQuery = null;
-    
+
     if (chart) {
         chart.destroy();
         chart = null;
@@ -462,14 +463,14 @@ function formatValue(value) {
     if (value === null || value === undefined) {
         return '<span style="color: #ccc;">null</span>';
     }
-    
+
     if (typeof value === 'number') {
         if (Number.isInteger(value)) {
             return value.toLocaleString();
         }
         return value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
-    
+
     return escapeHtml(String(value));
 }
 
@@ -485,7 +486,7 @@ function truncate(str, maxLen) {
 
 function getTimeAgo(date) {
     const seconds = Math.floor((new Date() - date) / 1000);
-    
+
     if (seconds < 60) return 'Just now';
     if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
     if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;

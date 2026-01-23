@@ -607,6 +607,7 @@ def upload_csv():
             return jsonify({"error": "Database not configured"}), 503
             
     except Exception as e:
+        print(f"❌ Upload error: {str(e)}")  # Print to server logs
         return jsonify({"error": "Upload failed", "details": str(e)}), 500
 
 
