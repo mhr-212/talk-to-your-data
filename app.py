@@ -577,8 +577,12 @@ def upload_csv():
         return jsonify({"error": "Only CSV files are allowed"}), 400
     
     try:
-        # 1. Read CSV into DataFrame
-        df = pd.read_csv(file)
+        # 1. Read CSV into DataFrame (Try UTF-8 first, then Latin-1 for Excel)
+        try:
+            df = pd.read_csv(file)
+        except UnicodeDecodeError:
+            file.seek(0)  # Reset file pointer
+            df = pd.read_csv(file, encoding='latin-1')
         
         # 2. Sanitize table name (use filename, alphanumeric only)
         table_name = "".join(c for c in file.filename.split(".")[0] if c.isalnum() or c == "_").lower()
