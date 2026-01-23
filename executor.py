@@ -15,7 +15,16 @@ def init_engine(database_url: str, statement_timeout_ms: int = 5000, readonly: b
     Returns:
         Configured SQLAlchemy Engine
     """
-    engine = create_engine(database_url, pool_pre_ping=True)
+    # Heroku compatibility: Fix "postgres://" -> "postgresql://"
+    if database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql://", 1)
+        
+    # SSL configuration for Heroku
+    connect_args = {}
+    if "localhost" not in database_url and "127.0.0.1" not in database_url:
+        connect_args["sslmode"] = "require"
+
+    engine = create_engine(database_url, connect_args=connect_args, pool_pre_ping=True)
     
     @event.listens_for(engine, "connect")
     def set_session_settings(dbapi_connection, connection_record):
