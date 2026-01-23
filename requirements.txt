@@ -8,3 +8,4 @@ pytest-cov
 PyJWT
 flask-limiter
 APScheduler
+gunicorn

@@ -77,3 +77,7 @@ Thumbs.db
 test_results.txt
 test_output.txt
 *.pyc
+
+# Local Documentation
+*.md
+!README.md
