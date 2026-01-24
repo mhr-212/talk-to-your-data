@@ -234,7 +234,7 @@ def query_data():
                 print(f"⚠ LLM Generation Failed: {e}")
                 
                 # Generate "Smart" Offline SQL
-                generated_sql = _dev_fallback_sql(question, list(schema_dict.keys()))
+                generated_sql = _dev_fallback_sql(question, list(schema_dict.keys()), schema_dict)
                 
                 # User-facing warning in explanation
                 error_short = str(e).split(']')[0] if ']' in str(e) else str(e)[:50]
@@ -361,7 +361,7 @@ def get_query_logs():
     return jsonify({"logs": recent_logs, "count": len(recent_logs)})
 
 
-def _dev_fallback_sql(question: str, available_tables: list) -> str:
+def _dev_fallback_sql(question: str, available_tables: list, schema_dict: dict = None) -> str:
     """
     Enhanced dev fallback: Basic regex-based SQL generation for offline/fallback mode.
     """
@@ -369,6 +369,12 @@ def _dev_fallback_sql(question: str, available_tables: list) -> str:
     q = question.lower()
     table = available_tables[0] if available_tables else "unknown_table"
     
+    # Try to find a better table match if multiple tables exist
+    for t in available_tables:
+        if t.lower() in q:
+            table = t
+            break
+            
     # 1. Simple Aggregations
     if "count" in q or "how many" in q:
         return f"SELECT COUNT(*) FROM {table}"
@@ -378,12 +384,35 @@ def _dev_fallback_sql(question: str, available_tables: list) -> str:
     if "top 5" in q: limit = 5
     elif "top 10" in q: limit = 10
     
-    # 3. Specific Columns (simple heuristic)
-    if "date" in q:
-        return f"SELECT * FROM {table} ORDER BY date DESC LIMIT {limit}"
+    # 3. Column matching (Smart Selection)
+    selected_cols = ["*"]
+    order_by = ""
     
-    # Default: Select all with limit
-    return f"SELECT * FROM {table} LIMIT {limit}"
+    if schema_dict and table in schema_dict:
+        columns = schema_dict[table]
+        found_cols = [col for col in columns if col.lower() in q]
+        
+        if found_cols:
+            selected_cols = found_cols
+            # If asking for specific columns, limit might not be needed unless explicit
+            if "limit" not in q and "top" not in q:
+                limit = 1000 
+    
+    # 4. Simple Filtering (e.g. "where region is 'East'")
+    where_clause = ""
+    # Very basic quoted string extraction: 'value' or "value"
+    match = re.search(r"['\"](.*?)['\"]", question)
+    if match and schema_dict and table in schema_dict:
+        val = match.group(1)
+        # Try to find a column that might match this value? 
+        # Too hard without data match. Just look for col in query locally.
+        for col in schema_dict[table]:
+            if col.lower() in q:
+                where_clause = f" WHERE {col} = '{val}'"
+                break
+
+    cols_str = ", ".join(selected_cols)
+    return f"SELECT {cols_str} FROM {table}{where_clause} LIMIT {limit}"
 
 
 @app.route("/auth/token", methods=["POST"])
