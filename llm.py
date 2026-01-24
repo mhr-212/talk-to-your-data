@@ -47,19 +47,38 @@ Question:
 {question}
 """
     
-    try:
-        response = client.models.generate_content(
-            model=model_id,
-            contents=prompt,
-            config=genai.types.GenerateContentConfig(
-                temperature=temperature,
-                max_output_tokens=1024,
+    models_to_try = [model_id, "gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"]
+    
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_models = [m for m in models_to_try if not (m in seen or seen.add(m))]
+
+    last_error = None
+    
+    for model in unique_models:
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=genai.types.GenerateContentConfig(
+                    temperature=temperature,
+                    max_output_tokens=1024,
+                )
             )
-        )
-        raw = getattr(response, "text", "").strip()
-        return normalize_sql(raw)
-    except Exception as e:
-        raise RuntimeError(f"LLM generation failed: {e}")
+            raw = getattr(response, "text", "").strip()
+            return normalize_sql(raw)
+        except Exception as e:
+            last_error = e
+            # If it's a 404 or 400 (model not found/supported), continue to next model
+            error_str = str(e).lower()
+            if "404" in error_str or "not found" in error_str or "not supported" in error_str:
+                continue
+            # If it's quota or other error, raise immediately (don't burn quota on other models)
+            if "429" in error_str or "exhausted" in error_str:
+                raise e
+            continue
+            
+    raise RuntimeError(f"LLM generation failed after trying models {unique_models}: {last_error}")
 
 
 def normalize_sql(output: str) -> str:

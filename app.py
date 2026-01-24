@@ -356,24 +356,27 @@ def get_query_logs():
 
 def _dev_fallback_sql(question: str, available_tables: list) -> str:
     """
-    Simple dev fallback: return a basic SELECT for testing without LLM.
-    Only works if 'sales' table exists.
+    Enhanced dev fallback: Basic regex-based SQL generation for offline/fallback mode.
     """
-    question_lower = question.lower()
+    import re
+    q = question.lower()
+    table = available_tables[0] if available_tables else "unknown_table"
     
-    if "sales" in available_tables:
-        if "region" in question_lower:
-            return "SELECT region, SUM(amount) as total FROM sales GROUP BY region"
-        elif "total" in question_lower or "sum" in question_lower:
-            return "SELECT SUM(amount) as total_sales FROM sales"
-        else:
-            return "SELECT * FROM sales"
+    # 1. Simple Aggregations
+    if "count" in q or "how many" in q:
+        return f"SELECT COUNT(*) FROM {table}"
     
-    # Fallback: just select first table
-    if available_tables:
-        return f"SELECT * FROM {available_tables[0]}"
+    # 2. Limit/Top
+    limit = 100
+    if "top 5" in q: limit = 5
+    elif "top 10" in q: limit = 10
     
-    raise ValueError("No tables available for fallback query")
+    # 3. Specific Columns (simple heuristic)
+    if "date" in q:
+        return f"SELECT * FROM {table} ORDER BY date DESC LIMIT {limit}"
+    
+    # Default: Select all with limit
+    return f"SELECT * FROM {table} LIMIT {limit}"
 
 
 @app.route("/auth/token", methods=["POST"])
