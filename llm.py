@@ -47,7 +47,7 @@ Question:
 {question}
 """
     
-    models_to_try = [model_id, "gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"]
+    models_to_try = [model_id, "gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro", "gemini-1.0-pro", "gemini-2.0-flash-exp"]
     
     # Remove duplicates while preserving order
     seen = set()

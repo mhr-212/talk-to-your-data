@@ -43,18 +43,30 @@ Sample of result rows:
 
 Explanation:"""
     
-    try:
-        response = client.models.generate_content(
-            model=model_id,
-            contents=prompt,
-            config=genai.types.GenerateContentConfig(
-                temperature=temperature,
-                max_output_tokens=500,
+    # Try fallback models for explanation too
+    models_to_try = [model_id, "gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro", "gemini-1.0-pro"]
+    
+    last_error = None
+    for model in models_to_try:
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=genai.types.GenerateContentConfig(
+                    temperature=temperature,
+                    max_output_tokens=500,
+                )
             )
-        )
-        return (getattr(response, "text", "") or "").strip()
-    except Exception as e:
-        error_str = str(e)
-        if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
-            return "AI daily quota exceeded. (You are on the free tier). The results above are still accurate!"
-        return f"(Explanation unavailable: {e})"
+            return (getattr(response, "text", "") or "").strip()
+        except Exception as e:
+            last_error = e
+            error_str = str(e).lower()
+            # If 404/400, try next model
+            if "404" in error_str or "not found" in error_str or "not supported" in error_str:
+                continue
+            # If quota exhausted, stop trying
+            if "429" in error_str or "exhausted" in error_str:
+                return "AI daily quota exceeded. (You are on the free tier). The results above are still accurate!"
+            continue
+            
+    return f"(Explanation unavailable: {str(last_error)})"
