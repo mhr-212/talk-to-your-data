@@ -363,59 +363,88 @@ def get_query_logs():
 
 def _dev_fallback_sql(question: str, available_tables: list, schema_dict: dict = None) -> str:
     """
-    Enhanced dev fallback: Basic regex-based SQL generation for offline/fallback mode.
+    Robust Rule-Based SQL Generator (No AI Required).
+    Parses natural language to Generate valid SQL for common patterns.
     """
     import re
-    q = question.lower()
+    q = question.lower().strip()
     table = available_tables[0] if available_tables else "unknown_table"
     
-    # Try to find a better table match if multiple tables exist
-    for t in available_tables:
-        if t.lower() in q:
-            table = t
-            break
-            
-    # 1. Simple Aggregations
-    if "count" in q or "how many" in q:
-        return f"SELECT COUNT(*) FROM {table}"
-    
-    # 2. Limit/Top
-    limit = 100
-    if "top 5" in q: limit = 5
-    elif "top 10" in q: limit = 10
-    
-    # 3. Column matching (Smart Selection)
-    selected_cols = ["*"]
-    
-    if schema_dict and table in schema_dict:
-        columns = schema_dict[table]
-        # Only match clear column names (length > 2 to avoid 'id', 'is', 'at') to reduce false positives
-        found_cols = [col for col in columns if len(col) > 2 and col.lower() in q]
-        
-        if found_cols:
-            selected_cols = found_cols
-            if "limit" not in q and "top" not in q:
-                limit = 1000 
-    
-    # 4. Simple Filtering 
-    # Only adding WHERE if we rely on a SPECIFIC quote match to avoid syntax errors
-    where_clause = ""
-    # Look for 'value' or "value"
-    match = re.search(r"['\"](.*?)['\"]", question)
-    if match and schema_dict and table in schema_dict:
-        val = match.group(1)
-        # Verify columns exist
-        curr_cols = schema_dict.get(table, [])
-        # Try to find which column this value belongs to by looking for column name in query
-        for col in curr_cols:
-            if col.lower() in q:
-                # Sanitize value to prevent SQL injection or syntax error
-                safe_val = val.replace("'", "''")
-                where_clause = f" WHERE {col} = '{safe_val}'"
+    # 0. Table Selection (if multiple tables exist)
+    if len(available_tables) > 1:
+        for t in available_tables:
+            if t.lower() in q:
+                table = t
                 break
 
-    cols_str = ", ".join(selected_cols)
-    return f"SELECT {cols_str} FROM {table}{where_clause} LIMIT {limit}"
+    # 1. Aggregations (Count)
+    if re.search(r"\b(count|how many|total number)\b", q):
+        return f"SELECT COUNT(*) FROM {table}"
+        
+    # 2. Aggregations (Sum/Avg) - Requires finding a numeric column
+    agg_match = re.search(r"\b(sum|total|average|avg)\b", q)
+    if agg_match and schema_dict and table in schema_dict:
+        agg_func = "AVG" if agg_match.group(1) in ["average", "avg"] else "SUM"
+        # Find a numeric column mentioned in query, or default to first numeric
+        # For now, just look for any column name in query
+        for col in schema_dict[table]:
+            if col.lower() in q:
+                return f"SELECT {agg_func}({col}) FROM {table}"
+
+    # 3. Specific Columns Selection
+    selected_cols = []
+    if schema_dict and table in schema_dict:
+        # Sort columns by length desc to match longest names first (e.g. 'user_id' before 'id')
+        all_cols = sorted(schema_dict[table], key=len, reverse=True)
+        for col in all_cols:
+            # Check for column name in query
+            # Use word boundary to avoid partial matches (e.g. 'id' inside 'width')
+            if re.search(r"\b" + re.escape(col.lower()) + r"\b", q):
+                selected_cols.append(col)
+    
+    # 4. Limit logic
+    limit = 100
+    limit_match = re.search(r"\b(top|limit)\s+(\d+)", q)
+    if limit_match:
+        limit = int(limit_match.group(2))
+    elif "top" in q: 
+        limit = 10
+        
+    # 5. Filtering (WHERE clause)
+    where_clause = ""
+    # Look for 'value' or "value"
+    quote_match = re.search(r"['\"](.*?)['\"]", question)
+    if quote_match and schema_dict and table in schema_dict:
+        val = quote_match.group(1)
+        safe_val = val.replace("'", "''") # SQL Escape
+        
+        # Determine which column this value belongs to
+        # 1. Check if column name is mentioned near the value
+        target_col = None
+        for col in schema_dict[table]:
+            if col.lower() in q:
+                target_col = col
+                break
+        
+        # 2. If no column mentioned, fallback to first text column (heuristic)
+        if not target_col:
+             # Just pick the first column that isn't ID? 
+             # Safer to just not filter if we don't know the column to avoid errors.
+             pass
+        else:
+            where_clause = f" WHERE {target_col} = '{safe_val}'"
+
+    # Construct Final Query
+    cols_sql = "*"
+    if selected_cols:
+        cols_sql = ", ".join(selected_cols)
+    
+    # If using specific columns, maybe don't limit unless asked? 
+    # Let's keep limit for safety, but increase it.
+    if selected_cols and limit == 100:
+        limit = 1000
+
+    return f"SELECT {cols_sql} FROM {table}{where_clause} LIMIT {limit}"
 
 
 @app.route("/auth/token", methods=["POST"])
