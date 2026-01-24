@@ -386,29 +386,32 @@ def _dev_fallback_sql(question: str, available_tables: list, schema_dict: dict =
     
     # 3. Column matching (Smart Selection)
     selected_cols = ["*"]
-    order_by = ""
     
     if schema_dict and table in schema_dict:
         columns = schema_dict[table]
-        found_cols = [col for col in columns if col.lower() in q]
+        # Only match clear column names (length > 2 to avoid 'id', 'is', 'at') to reduce false positives
+        found_cols = [col for col in columns if len(col) > 2 and col.lower() in q]
         
         if found_cols:
             selected_cols = found_cols
-            # If asking for specific columns, limit might not be needed unless explicit
             if "limit" not in q and "top" not in q:
                 limit = 1000 
     
-    # 4. Simple Filtering (e.g. "where region is 'East'")
+    # 4. Simple Filtering 
+    # Only adding WHERE if we rely on a SPECIFIC quote match to avoid syntax errors
     where_clause = ""
-    # Very basic quoted string extraction: 'value' or "value"
+    # Look for 'value' or "value"
     match = re.search(r"['\"](.*?)['\"]", question)
     if match and schema_dict and table in schema_dict:
         val = match.group(1)
-        # Try to find a column that might match this value? 
-        # Too hard without data match. Just look for col in query locally.
-        for col in schema_dict[table]:
+        # Verify columns exist
+        curr_cols = schema_dict.get(table, [])
+        # Try to find which column this value belongs to by looking for column name in query
+        for col in curr_cols:
             if col.lower() in q:
-                where_clause = f" WHERE {col} = '{val}'"
+                # Sanitize value to prevent SQL injection or syntax error
+                safe_val = val.replace("'", "''")
+                where_clause = f" WHERE {col} = '{safe_val}'"
                 break
 
     cols_str = ", ".join(selected_cols)
