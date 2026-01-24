@@ -136,17 +136,36 @@ function buildChart(columns, rows) {
         chart.destroy();
     }
 
-    // Try to find label and value columns
-    let labelCol = columns[0];
-    let valueCol = columns.find(c => c.toLowerCase().includes('total') ||
-        c.toLowerCase().includes('sum') ||
-        c.toLowerCase().includes('count') ||
-        c.toLowerCase().includes('amount')) || columns[1];
+    // Determine Label Column (First string-like column, or first date column)
+    let labelCol = columns.find(c => {
+        const val = rows[0][c];
+        return typeof val === 'string' && val.length < 50;
+    }) || columns[0];
 
-    if (!valueCol) valueCol = columns[columns.length - 1];
+    // Determine Value Column (First numeric column)
+    // Avoid IDs if other numbers exist
+    let numericCols = columns.filter(c => {
+        const val = rows[0][c];
+        return (typeof val === 'number' || !isNaN(parseFloat(val))) && !c.toLowerCase().endsWith('id');
+    });
 
-    const labels = rows.map(r => String(r[labelCol]));
-    const data = rows.map(r => Number(r[valueCol]) || 0);
+    if (numericCols.length === 0) {
+        // Fallback: Check for ID columns if nothing else
+        numericCols = columns.filter(c => typeof rows[0][c] === 'number');
+    }
+
+    let valueCol = numericCols[0];
+
+    // If we still have no value column, we can't chart
+    if (!valueCol) {
+        // Warning: No numeric data to chart
+        return;
+    }
+
+    // Limit data points to avoid crowding (Top 20)
+    const chartData = rows.slice(0, 20);
+    const labels = chartData.map(r => String(r[labelCol]));
+    const data = chartData.map(r => Number(r[valueCol]) || 0);
 
     chart = new Chart(ctx, {
         type: 'bar',
@@ -170,7 +189,7 @@ function buildChart(columns, rows) {
                 },
                 title: {
                     display: true,
-                    text: `${labelCol} vs ${valueCol}`
+                    text: `${labelCol} vs ${valueCol} (Top 20)`
                 }
             },
             scales: {

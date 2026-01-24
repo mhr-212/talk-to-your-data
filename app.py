@@ -229,9 +229,21 @@ def query_data():
                     timeout_seconds=config.LLM_TIMEOUT_S,
                 )
             except Exception as e:
-                # Graceful fallback when LLM fails
+                # CRITICAL CHANGE: Stop hiding errors. Report them to the user.
+                # Only use regex fallback if it's a transient 429/500 error.
+                error_str = str(e).lower()
+                if "404" in error_str or "not found" in error_str:
+                    # Model config error - user needs to know
+                    return jsonify({"error": "AI Model Error", "details": f"Model configuration failed: {e}. Check GENAI_MODEL_ID in Heroku."}), 500
+                elif "400" in error_str or "invalid" in error_str:
+                    # Bad request/key - user needs to know
+                    return jsonify({"error": "AI API Error", "details": f"API Key or Request invalid: {e}. Check API Key."}), 500
+                
+                # For Quota (429) or Server Error (500), try fallback but WARN the user
                 print(f"⚠ LLM generation failed: {e}, using fallback mode")
                 generated_sql = _dev_fallback_sql(question, list(schema_dict.keys()))
+                # Append [FALLBACK] tag so frontend knows
+                explanation = "⚠ Note: AI Service Unavailable. Running in basic keyword match mode."
         
         # 5. Validate SQL
         try:
