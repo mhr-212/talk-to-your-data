@@ -316,7 +316,17 @@ async function uploadFile(input) {
             body: formData
         });
 
-        const data = await response.json();
+        const text = await response.text();
+        let data;
+        try {
+            data = JSON.parse(text);
+        } catch (e) {
+            // If server returns HTML (500/404), show it
+            console.error("Server response:", text);
+            const errorMatch = text.match(/<pre>(.*?)<\/pre>/s) || text.match(/<title>(.*?)<\/title>/);
+            const errorText = errorMatch ? errorMatch[1] : text.substring(0, 100);
+            throw new Error(`Server Error: ${errorText}...`);
+        }
 
         if (response.ok) {
             showStatus(`Success! Uploaded '${data.table}' with ${data.rows} rows.`, 'success');
@@ -327,8 +337,7 @@ async function uploadFile(input) {
             document.getElementById('question').value = `Show me sample data from ${data.table}`;
             document.getElementById('question').focus();
         } else {
-            const errorMsg = data.details ? `${data.error}: ${data.details}` : data.error;
-            showStatus(`Upload failed: ${errorMsg}`, 'error');
+            showStatus(`Upload failed: ${data.error}`, 'error');
         }
     } catch (error) {
         showStatus(`Upload error: ${error.message}`, 'error');
